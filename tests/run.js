@@ -3,6 +3,7 @@ const assert = require('assert').strict;
 const { flatten, Cache, mergeTags, proposals, resolveMapping, classify } = require('../src/core');
 const { mapTags, requestMapping } = require('../src/mapping');
 const Worker = require('../src/inference/bridge');
+const path = require('path');
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
 const storage = () => { const data = new Map(); return { getItem: k => data.get(k) || null, setItem: (k,v) => data.set(k,v) }; };
@@ -103,6 +104,27 @@ test('承認された画像のすべてのキャラクターを保存', async ()
   const f = fixture(), row = f.row('1'); row.targets.push({...m('ボブ'),path:'作品A/ボブ',create:true});
   assert.deepEqual(await classify(f.api,[row],'lib',true),{saved:1,failed:0});
   assert.equal(f.created.length,3); assert.deepEqual(f.saved[0].folders,['previous','2','3']);
+});
+test('Python の相対パスと空欄はプラグイン基準で解決', () => {
+  const root = path.resolve(__dirname, '..');
+  assert.equal(Worker.resolvePythonPath('venv/Scripts/python.exe'), path.join(root, 'venv', 'Scripts', 'python.exe'));
+  assert.equal(Worker.resolvePythonPath('  '), path.resolve(root, Worker.DEFAULT_PYTHON_PATH));
+  assert.equal(Worker.resolvePythonPath(undefined), path.resolve(root, Worker.DEFAULT_PYTHON_PATH));
+});
+test('Python の絶対パスと明示コマンドを保持', () => {
+  const absolute = path.resolve(__dirname, 'other env', 'python.exe');
+  assert.equal(Worker.resolvePythonPath(absolute), absolute);
+  assert.equal(Worker.resolvePythonPath('python3'), 'python3');
+});
+require('./startup')(test);
+test('Camie モデルの相対パス・空欄はプラグイン基準、絶対パスは保持', () => {
+  const root = path.resolve(__dirname, '..');
+  for (const camiePath of [undefined, '', '  ', 'models']) {
+    assert.equal(new Worker({camiePath}).config.camiePath, path.join(root, 'models'));
+  }
+  assert.equal(new Worker({camiePath:'custom/models'}).config.camiePath, path.join(root, 'custom', 'models'));
+  const absolute = path.resolve(root, '..', 'other models');
+  assert.equal(new Worker({camiePath:absolute}).config.camiePath, absolute);
 });
 (async()=>{
   for(const [name,fn] of tests) { await fn(); console.log(`✓ ${name}`); }

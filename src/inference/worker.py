@@ -16,6 +16,8 @@ def main():
     try:
         config = json.loads(sys.stdin.readline())
         with contextlib.redirect_stdout(sys.stderr):
+            from windows_runtime import prepare_windows_runtime
+            prepare_windows_runtime()
             if config["model"] == "camie":
                 from camie import load_metadata, create_session, preprocess_image, run_inference
                 root = config["camiePath"]
@@ -28,12 +30,10 @@ def main():
                     return {key: [t for t in tags.get(key, []) if t["confidence"] >= config[key + "Threshold"]]
                             for key in ("character", "copyright")}
             else:
-                from transformers import pipeline
-                import torch
+                from pixai import load_tagger, PUBLIC_MODEL_ID
                 from PIL import Image, ImageOps
-                model_id = config["pixaiPath"] or "pixai-labs/pixai-tagger-v1.0"
-                tagger = pipeline(model=model_id, image_processor=model_id, trust_remote_code=True,
-                                  device=0 if torch.cuda.is_available() else -1)
+                model_id = config["pixaiPath"] or PUBLIC_MODEL_ID
+                tagger = load_tagger(model_id)
 
                 def infer(path):
                     with Image.open(path) as image:

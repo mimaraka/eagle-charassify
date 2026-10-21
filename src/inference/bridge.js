@@ -2,13 +2,26 @@
 const { spawn } = require('child_process');
 const { createInterface } = require('readline');
 const path = require('path');
+const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
+const DEFAULT_CAMIE_PATH = 'models';
+const DEFAULT_PYTHON_PATH = process.platform === 'win32' ? '.venv/Scripts/python.exe' : '.venv/bin/python';
+
+function resolvePythonPath(value) {
+  const executable = value?.trim() || DEFAULT_PYTHON_PATH;
+  // 明示指定した python / python3 等のコマンド名は PATH から探す。
+  if (path.isAbsolute(executable) || !/[\\/]/.test(executable)) return executable;
+  return path.resolve(PLUGIN_ROOT, executable);
+}
 
 class Worker {
-  constructor(config) { this.config = config; this.pending = new Map(); this.counter = 0; }
+  constructor(config) {
+    this.config = { ...config, camiePath: path.resolve(PLUGIN_ROOT, config.camiePath?.trim() || DEFAULT_CAMIE_PATH) };
+    this.pending = new Map(); this.counter = 0;
+  }
   start() {
     return new Promise((resolve, reject) => {
       this.rejectStart = reject;
-      this.proc = spawn(this.config.pythonPath || 'python', ['-u', path.join(__dirname, 'worker.py')], {
+      this.proc = spawn(resolvePythonPath(this.config.pythonPath), ['-u', path.join(__dirname, 'worker.py')], {
         windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
       });
       this.timer = setTimeout(() => this.stop(new Error('モデル読み込みがタイムアウトしました（10分）。')), 600000);
@@ -49,3 +62,6 @@ class Worker {
   }
 }
 module.exports = Worker;
+module.exports.DEFAULT_PYTHON_PATH = DEFAULT_PYTHON_PATH;
+module.exports.DEFAULT_CAMIE_PATH = DEFAULT_CAMIE_PATH;
+module.exports.resolvePythonPath = resolvePythonPath;

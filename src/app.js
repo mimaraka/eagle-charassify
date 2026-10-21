@@ -5,9 +5,9 @@ const { mapTags } = require('./mapping');
 const { getTargetImageItems } = require('./eagle/items');
 const Worker = require('./inference/bridge');
 const $ = id => document.getElementById(id);
-const defaults = { pythonPath: '', camiePath: '', pixaiPath: 'pixai-labs/pixai-tagger-v1.0',
+const defaults = { pythonPath: Worker.DEFAULT_PYTHON_PATH, camiePath: Worker.DEFAULT_CAMIE_PATH, pixaiPath: 'pixai-labs/pixai-tagger-v1.0',
   camieCharacter: 0.35, camieCopyright: 0.35, pixaiCharacter: 0.27, pixaiCopyright: 0.24,
-  language: '日本語', allowCreate: true, endpoint: '', model: '', source: 'selected', tagger: 'camie' };
+  language: '日本語', allowCreate: true, endpoint: '', model: '', apiKey: '', source: 'selected', tagger: 'camie' };
 let config = { ...defaults }, rows = [], folders = [], library = '', analysisLibrary = '', busy = false, cancelled = false, worker = null;
 function node(tag, text, className) {
   const el = document.createElement(tag); if (text != null) el.textContent = text;
@@ -17,7 +17,11 @@ function button(text, action) { const b = node('button', text); b.onclick = acti
 function message(text) { $('status').textContent = text; }
 function cache() { return new Cache(localStorage, library, config.language); }
 function show(panel) {
-  for (const id of ['review', 'settings', 'cache']) $(`${id}Panel`).hidden = id !== panel;
+  for (const id of ['review', 'settings', 'cache']) {
+    $(`${id}Panel`).hidden = id !== panel;
+    $(`${id}Tab`).setAttribute('aria-selected', String(id === panel));
+    $(`${id}Tab`).tabIndex = id === panel ? 0 : -1;
+  }
 }
 function setBusy(value) {
   busy = value;
@@ -116,7 +120,7 @@ async function analyze() {
   } catch (e) { message(e.message); }
   finally { setBusy(false); }
 }
-function saveConfig() { const { apiKey, ...safe } = config; localStorage.setItem('charassify:settings:v1', JSON.stringify(safe)); }
+function saveConfig() { localStorage.setItem('charassify:settings:v1', JSON.stringify(config)); }
 function loadSettingsForm() {
   const form = $('settingsForm');
   for (const [key, value] of Object.entries(config)) {
@@ -144,10 +148,15 @@ function renderCache() {
   }));
   if (!entries.length) $('cacheList').append(node('p', '保存済みの対応はありません。'));
 }
+let initialized = false;
 async function init() {
+  if (initialized) return;
+  initialized = true;
   try {
-    config = { ...defaults, ...JSON.parse(localStorage.getItem('charassify:settings:v1') || '{}'), apiKey: '' };
-    await refreshLibrary(); loadSettingsForm();
+    config = { ...defaults, ...JSON.parse(localStorage.getItem('charassify:settings:v1') || '{}') };
+    config.pythonPath = config.pythonPath?.trim() || defaults.pythonPath;
+    config.camiePath = config.camiePath?.trim() || defaults.camiePath;
+    loadSettingsForm();
     $('source').value = config.source; $('tagger').value = config.tagger;
   } catch (e) { message(`初期化エラー: ${e.message}`); }
   $('analyze').onclick = analyze;
@@ -155,6 +164,17 @@ async function init() {
   $('filter').onchange = render;
   $('reviewTab').onclick = () => show('review');
   $('settingsTab').onclick = () => { loadSettingsForm(); show('settings'); };
+  const tabs = ['reviewTab', 'cacheTab', 'settingsTab'].map($);
+  for (const tab of tabs) tab.onkeydown = event => {
+    const available = tabs.filter(t => !t.disabled);
+    const index = available.indexOf(tab);
+    let next;
+    if (event.key === 'ArrowRight') next = available[(index + 1) % available.length];
+    if (event.key === 'ArrowLeft') next = available[(index + available.length - 1) % available.length];
+    if (event.key === 'Home') next = available[0];
+    if (event.key === 'End') next = available[available.length - 1];
+    if (next) { event.preventDefault(); next.focus(); }
+  };
   $('cacheTab').onclick = async () => {
     try {
       await refreshLibrary();
@@ -169,6 +189,8 @@ async function init() {
     event.preventDefault();
     const next = { ...config };
     for (const input of $('settingsForm').elements) if (input.name) next[input.name] = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value.trim();
+    next.pythonPath = next.pythonPath || defaults.pythonPath;
+    next.camiePath = next.camiePath || defaults.camiePath;
     config = next; saveConfig();
     // 言語・新規作成ポリシーを変更した後は古い承認結果を使わない。
     rows = []; $('results').replaceChildren(node('div', '設定を保存しました。解析を開始してください。', 'empty'));
@@ -186,7 +208,9 @@ async function init() {
     finally { setBusy(false); }
   };
   render();
+  // ライブラリ情報の取得中や失敗時も、設定画面は操作できる状態にする。
+  try { await refreshLibrary(); }
+  catch (e) { message(`ライブラリ取得エラー: ${e.message}`); }
 }
 window.addEventListener('beforeunload', () => worker?.stop());
-if (typeof eagle !== 'undefined') eagle.onPluginCreate(init);
-else message('Eagle のプラグイン開発メニューからこのフォルダを読み込んでください。');
+module.exports = { init };

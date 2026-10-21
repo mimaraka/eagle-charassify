@@ -26,17 +26,21 @@ Eagle 用のキャラクターイラスト分類プラグインです。`eagle-c
    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
    ```
 
-2. [Camie Tagger v2](https://huggingface.co/Camais03/camie-tagger-v2/tree/main) から次のファイルを同じフォルダへ配置します（Camie を使う場合）。
+2. [Camie Tagger v2](https://huggingface.co/Camais03/camie-tagger-v2/tree/main) から次のファイルをプラグイン内の `models/` へ配置します（Camie を使う場合）。設定の既定値は `models` です。相対パスはプラグインのフォルダを基準に解決し、空欄でも既定値を使用します。別の場所の絶対パスも指定できます。`models/.gitkeep` のみ Git 管理し、モデルファイルは管理対象から除外します。
    - `camie-tagger-v2.onnx`
    - `camie-tagger-v2-metadata.json`
 3. Eagle のプラグイン開発メニューで、このディレクトリの `manifest.json` を含むプラグインを読み込みます。
-4. 設定画面で Python 実行ファイルの絶対パスとモデルの場所を指定します。
+4. 設定画面で Python 実行ファイルとモデルの場所を確認します。Python の既定値は Windows で `.venv/Scripts/python.exe`、macOS / Linux で `.venv/bin/python` です。相対パスはプラグインのフォルダを基準に解決するため、手順1で作成した仮想環境をそのまま使用できます。別の仮想環境の絶対パスも指定できます。空欄は既定値として扱い、`python` / `python3` のようなコマンド名だけを明示指定した場合は PATH から探します。
 5. Chat Completions 互換 LLM の完全な接続先 URL、モデル ID、必要なら API キーを指定します。クラウドには HTTPS、ローカルサーバーには localhost の HTTP を利用できます。
 6. 出力言語・新規フォルダ作成の有無を設定し、保存します。
 
 PixAI は [公式モデル](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) の Transformers pipeline を利用します。既定のモデル ID では初回にモデルとコードがダウンロードされます。`trust_remote_code=True` で公式リポジトリのコードを実行します。ダウンロード済みのモデル一式を含むローカルフォルダも指定できます。Camie のモデルは自動ダウンロードしません。
 
+公式 PixAI モデルは公開されているため、取得時に Hugging Face の認証トークンを送信しません。これにより、別の用途で保存されたトークンが期限切れでも読み込めます。別のモデル ID を指定した場合は既存の認証設定を使用します。
+
 モデルは同梱していません。GPU の利用には環境に合った PyTorch / CUDA が必要です。Camie は標準構成で CPU 推論を利用します。GPU を使う場合は `onnxruntime` の代わりに対応する `onnxruntime-gpu` を導入してください。両モデル併用時はモデルごとにプロセスを終了してから次を起動し、モデルを同時にメモリへ保持しません。
+
+Windows で Anaconda 由来の仮想環境を使う場合、古い Visual C++ DLL が優先され、PyTorch の `c10.dll` 読み込みで `WinError 1114` が発生することがあります。Charassify はこの環境を検出すると、Windows のシステムフォルダにある Visual C++ ランタイムを推論プロセス内で先に読み込みます。Anaconda 本体やシステムの DLL ファイルは変更しません。
 
 ## 使い方
 
@@ -56,7 +60,7 @@ LLM による衣装差分の統合は意味推定です。未知のキャラク�
 
 - 画像はローカル Python で処理します。LLM へ画像は送信しません。
 - LLM へ送る情報は、キャラクター／作品タグ、既存フォルダの名前・階層・ID、同じライブラリと言語の対応キャッシュです。
-- 設定・キャッシュはプラグインの `localStorage` に保存します。API キーは起動中のメモリのみです。
+- 設定・キャッシュ・API キーはプラグインの `localStorage` に保存します。API キーは暗号化せず保存し、次回起動時に復元します。削除する場合は設定画面で API キーを空欄にして保存してください。保存せずに別のタブへ移動した変更は保存されません。
 - 解析を中止すると部分結果を破棄します。名前変換・分類保存の段階では中止ボタンを表示しません。
 - モデルの一方が失敗した場合も、もう一方の結果をレビューできます。画像ごとのエラーを表示します。
 - 名前変換は30タグ単位、90秒のタイムアウトです。モデル初期化は10分、画像推論は3分のタイムアウトです。
@@ -69,6 +73,7 @@ LLM による衣装差分の統合は意味推定です。未知のキャラク�
 
 ```powershell
 npm test
+python -m unittest discover -s tests -p "test_*.py"
 python -m py_compile src/inference/worker.py src/inference/camie.py
 ```
 
