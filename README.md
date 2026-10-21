@@ -1,75 +1,77 @@
 # Charassify
 
-Eagle 用のキャラクターイラスト分類プラグインです。`eagle-ct_classifier` の画像取得・Camie 推論を基に、モデル選択、名前の対応付け、確認、保存を分離して再設計しています。
+English | [日本語](README-ja.md)
 
-## できること
+A character illustration classification plugin for Eagle. Built on the image retrieval and Camie inference code from `eagle-ct_classifier`, it separates model selection, name mapping, review, and saving into distinct steps.
 
-- 選択中の画像／ライブラリの「未分類」画像全体を解析
-- Camie Tagger v2／PixAI Tagger v1.0／両方を選択
-- 複数モデルのタグを統合し、検出元と最大スコアを表示
-- LLM でキャラクター名・作品名を指定言語へ変換、既存フォルダを優先
-- 衣装差分を同じ基本キャラクターへ対応付け、同じ分類先を重複排除
-- 画像ごとの承認・却下・分類先の追加／削除、絞り込み、一括承認
-- 承認済みの画像のみ分類。既存の所属フォルダは保持
-- 新規作成を有効にすると「作品名 / キャラクター名」を分類実行時に作成
-- ライブラリのパス・言語ごとの対応キャッシュ。検索・編集・削除が可能
-- キャッシュを先に使用。LLM の失敗時も保存済みの対応でレビューへ進む
+## Features
 
-「未分類」は Eagle の組み込み未分類状態（`isUnfiled`）です。「未分類」という名前の通常フォルダではありません。
+- Analyze selected images or all unfiled images in the library.
+- Choose Camie Tagger v2, PixAI Tagger v1.0, or both.
+- Merge tags from multiple models and show their sources and highest confidence scores.
+- Use an LLM to translate character and series names into your chosen language, prioritizing existing folders.
+- Map outfit variants to the same base character and deduplicate classification destinations.
+- Approve or reject individual images, add or remove destinations, filter results, and approve visible results in bulk.
+- Classify only approved images while preserving their existing folder memberships.
+- Optionally create `Series name / Character name` folders when classification runs.
+- Search, edit, and delete cached mappings, stored separately for each library path and language.
+- Use cached mappings first and continue to review with saved mappings if the LLM fails.
 
-## セットアップ
+“Unfiled” refers to Eagle's built-in unfiled state (`isUnfiled`), not a regular folder named “Unfiled.”
 
-1. Python 3.10 以降で仮想環境を作成し、依存を導入します。Windows の例:
+## Setup
+
+1. Create a virtual environment with Python 3.10 or later and install the dependencies. On Windows:
 
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
    ```
 
-2. [Camie Tagger v2](https://huggingface.co/Camais03/camie-tagger-v2/tree/main) から次のファイルをプラグイン内の `models/` へ配置します（Camie を使う場合）。設定の既定値は `models` です。相対パスはプラグインのフォルダを基準に解決し、空欄でも既定値を使用します。別の場所の絶対パスも指定できます。`models/.gitkeep` のみ Git 管理し、モデルファイルは管理対象から除外します。
+2. If using Camie, download the following files from [Camie Tagger v2](https://huggingface.co/Camais03/camie-tagger-v2/tree/main) and place them in the plugin's `models/` directory. The default setting is `models`. Relative paths resolve from the plugin directory; leaving the field blank also uses the default. You can specify an absolute path to another location. Only `models/.gitkeep` is tracked by Git; model files are excluded.
    - `camie-tagger-v2.onnx`
    - `camie-tagger-v2-metadata.json`
-3. Eagle のプラグイン開発メニューで、このディレクトリの `manifest.json` を含むプラグインを読み込みます。
-4. 設定画面で Python 実行ファイルとモデルの場所を確認します。Python の既定値は Windows で `.venv/Scripts/python.exe`、macOS / Linux で `.venv/bin/python` です。相対パスはプラグインのフォルダを基準に解決するため、手順1で作成した仮想環境をそのまま使用できます。別の仮想環境の絶対パスも指定できます。空欄は既定値として扱い、`python` / `python3` のようなコマンド名だけを明示指定した場合は PATH から探します。
-5. Chat Completions 互換 LLM の完全な接続先 URL、モデル ID、必要なら API キーを指定します。クラウドには HTTPS、ローカルサーバーには localhost の HTTP を利用できます。
-6. 出力言語・新規フォルダ作成の有無を設定し、保存します。
+3. Use Eagle's plugin development menu to load the plugin containing this directory's `manifest.json`.
+4. In Settings, check the Python executable and model locations. The default Python path is `.venv/Scripts/python.exe` on Windows and `.venv/bin/python` on macOS / Linux. Relative paths resolve from the plugin directory, so the virtual environment created in step 1 works directly. You can also specify an absolute path to another environment. An empty field uses the default; an explicit command name such as `python` or `python3` is resolved through PATH.
+5. Enter the full endpoint URL of a Chat Completions-compatible LLM, its model ID, and an API key if required. Use HTTPS for cloud endpoints; HTTP is supported for local servers on localhost.
+6. Set the output language and whether to allow new folders, then save.
 
-PixAI は [公式モデル](https://huggingface.co/pixai-labs/pixai-tagger-v1.0) の Transformers pipeline を利用します。既定のモデル ID では初回にモデルとコードがダウンロードされます。`trust_remote_code=True` で公式リポジトリのコードを実行します。ダウンロード済みのモデル一式を含むローカルフォルダも指定できます。Camie のモデルは自動ダウンロードしません。
+PixAI uses the Transformers pipeline from the [official model](https://huggingface.co/pixai-labs/pixai-tagger-v1.0). With the default model ID, the model and code are downloaded on first use. It executes code from the official repository with `trust_remote_code=True`. You can also specify a local directory containing the complete downloaded model. Camie models are not downloaded automatically.
 
-公式 PixAI モデルは公開されているため、取得時に Hugging Face の認証トークンを送信しません。これにより、別の用途で保存されたトークンが期限切れでも読み込めます。別のモデル ID を指定した場合は既存の認証設定を使用します。
+Because the official PixAI model is public, no Hugging Face authentication token is sent when downloading it. This allows loading even if a token saved for another purpose has expired. Other model IDs use the existing authentication configuration.
 
-モデルは同梱していません。GPU の利用には環境に合った PyTorch / CUDA が必要です。Camie は標準構成で CPU 推論を利用します。GPU を使う場合は `onnxruntime` の代わりに対応する `onnxruntime-gpu` を導入してください。両モデル併用時はモデルごとにプロセスを終了してから次を起動し、モデルを同時にメモリへ保持しません。
+Models are not bundled. GPU use requires PyTorch / CUDA versions appropriate for your environment. Camie uses CPU inference by default; to use a GPU, install a compatible `onnxruntime-gpu` instead of `onnxruntime`. When using both models, each model's process exits before the next starts, so both models are never held in memory at once.
 
-Windows で Anaconda 由来の仮想環境を使う場合、古い Visual C++ DLL が優先され、PyTorch の `c10.dll` 読み込みで `WinError 1114` が発生することがあります。Charassify はこの環境を検出すると、Windows のシステムフォルダにある Visual C++ ランタイムを推論プロセス内で先に読み込みます。Anaconda 本体やシステムの DLL ファイルは変更しません。
+On Windows, virtual environments derived from Anaconda may prioritize older Visual C++ DLLs, causing `WinError 1114` when PyTorch loads `c10.dll`. When Charassify detects this environment, it preloads the Visual C++ runtime from the Windows system directory within the inference process. It does not modify Anaconda or system DLL files.
 
-## 使い方
+## Usage
 
-1. 解析対象とモデルを選び「解析を開始」。
-2. 各画像のタグ・スコア・分類先を確認します。未マッピングの画像にも分類先を手動追加できます。
-3. 分類先入力では既存フォルダの完全なパスを選択するか、新規の `作品名/キャラクター名` を入力します。
-4. 各画像を承認／却下します。分類先を変更すると未確認へ戻ります。
-5. 「承認済みを分類」で保存します。新規フォルダもこの段階で作成します。
+1. Select the images to analyze and the model, then click **Start analysis** (`解析を開始`).
+2. Review each image's tags, scores, and destinations. You can manually add destinations for images without mappings.
+3. In the destination field, select the full path of an existing folder or enter a new `Series name/Character name` path.
+4. Approve or reject each image. Changing its destinations resets it to pending review.
+5. Click **Classify approved items** (`承認済みを分類`) to save. New folders are also created at this stage.
 
-LLM の応答が不明・不正な場合はその対応を保存しません。作品が不明なままフォルダを新規作成することもありません。同名フォルダが複数ある場合は自動で最初の候補を選ばず、対応表のフォルダ選択で ID を指定できます。
+Unknown or invalid LLM mappings are not saved. New folders are never created when the series is unknown. If multiple folders share the same name, the plugin does not automatically choose the first match; you can select a specific folder ID in the mapping table.
 
-「名前の対応表」でキャラクター名・作品名・既存分類先を訂正できます。「名前から照合 / 新規作成」を選ぶと既存 ID の固定を解除します。衣装差分には同じ名前と分類先を指定してください。変更は次の解析に適用されます。対応表の削除は Eagle のフォルダ・アイテムには影響しません。
+In **Name mappings** (`名前の対応表`), you can correct character names, series names, and existing destinations. Choosing **Match by name / Create new** (`名前から照合 / 新規作成`) removes the fixed folder ID. Give outfit variants the same name and destination. Changes take effect on the next analysis. Deleting a mapping does not affect Eagle folders or items.
 
-LLM による衣装差分の統合は意味推定です。未知のキャラクターや同名の別人を常に正確に判定できる保証はありません。検出結果と提案先を確認してから承認してください。
+The LLM infers which outfit variants belong to the same character. It cannot guarantee correct identification of unknown characters or different characters with the same name. Review detections and proposed destinations before approving them.
 
-## データとエラー処理
+## Data and error handling
 
-- 画像はローカル Python で処理します。LLM へ画像は送信しません。
-- LLM へ送る情報は、キャラクター／作品タグ、既存フォルダの名前・階層・ID、同じライブラリと言語の対応キャッシュです。
-- 設定・キャッシュ・API キーはプラグインの `localStorage` に保存します。API キーは暗号化せず保存し、次回起動時に復元します。削除する場合は設定画面で API キーを空欄にして保存してください。保存せずに別のタブへ移動した変更は保存されません。
-- 解析を中止すると部分結果を破棄します。名前変換・分類保存の段階では中止ボタンを表示しません。
-- モデルの一方が失敗した場合も、もう一方の結果をレビューできます。画像ごとのエラーを表示します。
-- 名前変換は30タグ単位、90秒のタイムアウトです。モデル初期化は10分、画像推論は3分のタイムアウトです。
-- 保存直前に対象を再取得し、解析後のライブラリ切替を検出すると書き込みを停止します。
-- 保存失敗は画像ごとに表示し、成功分を再保存せず失敗分を再試行できます。
-- Eagle API に複数操作のトランザクションはないため、アイテム保存失敗時に作成済みの空フォルダが残る場合があります。
-- PNG、JPEG、WebP など Pillow が読み込める画像が対象です。SVG は対象外です。GIF は先頭フレーム、その他の形式は Python 環境の対応状況に依存します。
+- Images are processed locally in Python. Images are not sent to the LLM.
+- The LLM receives character and series tags, existing folder names, hierarchy and IDs, and cached mappings for the same library and language.
+- Settings, mappings, and API keys are stored in the plugin's `localStorage`. API keys are stored without encryption and restored on the next launch. To remove a key, clear the API key field in Settings and save. Edits made before switching tabs without saving are not persisted.
+- Cancelling analysis discards partial results. The cancel button is hidden during name mapping and classification saving.
+- If one model fails, you can still review the other model's results. Errors are shown per image.
+- Name mapping uses batches of 30 tags with a 90-second timeout. Model initialization has a 10-minute timeout, and image inference has a 3-minute timeout.
+- Targets are fetched again immediately before saving. If the library has changed since analysis, writing stops.
+- Save failures are shown per image. Failed items can be retried without saving successful items again.
+- Eagle's API does not provide transactions across multiple operations, so newly created empty folders may remain if saving an item fails.
+- Supported inputs include PNG, JPEG, WebP, and other images readable by Pillow. SVG is excluded. GIF uses the first frame; support for other formats depends on the Python environment.
 
-## 開発・検証
+## Development and validation
 
 ```powershell
 npm test
@@ -77,17 +79,17 @@ python -m unittest discover -s tests -p "test_*.py"
 python -m py_compile src/inference/worker.py src/inference/camie.py
 ```
 
-JavaScript は外部 npm 依存なしで動作します。Eagle の Node.js 16 / Chromium 107 で利用できる構文・API を使用しています。テストの Eagle API と LLM はモックです。実モデル・実 LLM・Eagle 上での画面表示と分類は別途実機確認が必要です。
+The JavaScript code runs without external npm dependencies and uses syntax and APIs available in Eagle's Node.js 16 / Chromium 107 environment. Tests mock the Eagle API and LLM. Real models, real LLMs, and the UI and classification behavior inside Eagle require separate manual verification.
 
-```
-src/app.js               画面、解析の進行、レビュー
-src/core.js              キャッシュ、分類先解決、承認後の保存
-src/mapping.js           LLM の名前変換とキャッシュ優先処理
-src/eagle/items.js       既存プラグインから継承した画像取得
-src/inference/bridge.js  Python プロセス管理
-src/inference/worker.py  モデルごとの共通インターフェース
-src/inference/camie.py   既存プラグインから継承した Camie 推論
-tests/run.js             モデル・LLM を使わない動作テスト
+```text
+src/app.js               UI, analysis workflow, and review
+src/core.js              Cache, destination resolution, and saving approved items
+src/mapping.js           LLM name mapping and cache-first processing
+src/eagle/items.js       Image retrieval inherited from the original plugin
+src/inference/bridge.js  Python process management
+src/inference/worker.py  Shared interface for individual models
+src/inference/camie.py   Camie inference inherited from the original plugin
+tests/run.js             Tests without real models or LLMs
 ```
 
-モデル仕様の確認元: [Camie](https://huggingface.co/Camais03/camie-tagger-v2)、[PixAI](https://huggingface.co/pixai-labs/pixai-tagger-v1.0)。Eagle API: [folder](https://developer.eagle.cool/plugin-api/api/folder)、[library](https://developer.eagle.cool/plugin-api/api/library)。モデル・モデルコードの利用条件は各提供元のライセンスに従ってください。
+Model references: [Camie](https://huggingface.co/Camais03/camie-tagger-v2), [PixAI](https://huggingface.co/pixai-labs/pixai-tagger-v1.0). Eagle API: [folder](https://developer.eagle.cool/plugin-api/api/folder), [library](https://developer.eagle.cool/plugin-api/api/library). Use models and model code in accordance with their providers' licenses.

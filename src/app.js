@@ -38,9 +38,37 @@ async function refreshLibrary() {
 }
 function visibleRows() {
   const filter = $('filter').value;
-  return rows.filter(r => filter === 'all' || (filter === 'error' ? r.errors.length || r.applyError : r.decision === filter));
+  return rows.filter(r => filter === 'all' || (filter === 'success' ? r.analysisSucceeded : filter === 'error' ? r.errors.length || r.applyError : r.decision === filter));
+}
+let preview;
+function hidePreview() { if (preview) preview.hidden = true; }
+function showPreview(img, item) {
+  if (!preview) {
+    preview = node('img', null, 'image-preview');
+    preview.hidden = true;
+    document.body.append(preview);
+  }
+  const rect = img.getBoundingClientRect(), margin = 12;
+  const right = window.innerWidth - rect.right - margin * 2;
+  const left = rect.left - margin * 2;
+  const width = Math.min(600, Math.max(right, left), window.innerWidth - margin * 2);
+  const height = Math.min(720, window.innerHeight - margin * 2);
+  // 狭い画面ではサムネイルに重ねても、ポインター操作は妨げない。
+  preview.style.width = `${Math.max(width, Math.min(320, window.innerWidth - margin * 2))}px`;
+  preview.style.height = `${height}px`;
+  preview.style.left = `${width >= 320 ? (right >= left ? rect.right + margin : rect.left - margin - width) : margin}px`;
+  preview.style.top = `${Math.max(margin, Math.min(rect.top, window.innerHeight - height - margin))}px`;
+  preview.alt = item.name;
+  const fallback = pathToFileURL(item.thumbnailPath || item.filePath).href;
+  preview.onerror = () => {
+    preview.onerror = null;
+    preview.src = fallback;
+  };
+  preview.src = pathToFileURL(item.filePath || item.thumbnailPath).href;
+  preview.hidden = false;
 }
 function render() {
+  hidePreview();
   const approved = rows.filter(r => r.decision === 'approved' && !r.applied).length;
   $('summary').textContent = `${rows.length} 件 · 承認 ${approved} 件 · 分類済み ${rows.filter(r => r.applied).length} 件`;
   $('apply').disabled = busy || !approved;
@@ -49,13 +77,19 @@ function render() {
     const card = node('article', null, `card ${row.decision}`);
     const img = node('img'); img.loading = 'lazy'; img.alt = row.item.name;
     img.src = pathToFileURL(row.item.thumbnailPath || row.item.filePath).href;
+    img.tabIndex = 0;
+    img.setAttribute('aria-label', `${row.item.name} の拡大プレビュー`);
+    img.onmouseenter = img.onfocus = () => showPreview(img, row.item);
+    img.onmouseleave = img.onblur = hidePreview;
     const body = node('div', null, 'cardbody'); body.append(node('h3', row.item.name));
     body.append(node('span', row.applied ? '分類済み' : { pending: '未確認', approved: '承認', rejected: '却下' }[row.decision], 'badge'));
     body.append(node('p', (row.tags.character || []).map(t => `${t.tag} ${Math.round(t.confidence * 100)}% (${t.sources.join(' + ')})`).join(' / ') || 'キャラクター未検出', 'tags'));
     if (row.errors.length || row.applyError) body.append(node('p', [...row.errors, row.applyError].filter(Boolean).join('\n'), 'error'));
     const targets = node('div', null, 'targets');
     row.targets.forEach((t, i) => {
-      const line = node('div', null, 'target'); line.append(node('span', `${t.create ? '新規: ' : ''}${t.path}`));
+      const line = node('div', null, 'target');
+      const name = node('span', `${t.create ? '新規: ' : ''}${t.path.split('/').pop()}`);
+      name.title = t.path; line.append(name);
       const remove = button('×', () => { row.targets.splice(i, 1); row.decision = 'pending'; render(); });
       remove.title = '分類先を削除'; remove.disabled = busy || row.applied; line.append(remove); targets.append(line);
     });
@@ -114,7 +148,12 @@ async function analyze() {
     if (cancelled) { rows = []; $('results').replaceChildren(node('div', '解析を中止しました。', 'empty')); message('中止しました。'); return; }
     $('cancel').hidden = true;
     const mapped = await mapTags(rows, folders, cache(), config, message);
-    for (const row of rows) row.targets = proposals(row.tags, mapped.mappings, folders, config.allowCreate);
+    for (const row of rows) {
+      row.targets = proposals(row.tags, mapped.mappings, folders, config.allowCreate);
+      const characters = row.tags.character || [];
+      row.analysisSucceeded = !row.errors.length && characters.length > 0 &&
+        characters.every(t => resolveMapping(mapped.mappings[t.tag], folders, config.allowCreate));
+    }
     $('warnings').textContent = [...new Set(mapped.warnings)].join('\n');
     message('解析が完了しました。分類先を確認し、各画像を承認してください。');
   } catch (e) { message(e.message); }
@@ -162,6 +201,10 @@ async function init() {
   $('analyze').onclick = analyze;
   $('cancel').onclick = () => { cancelled = true; worker?.stop(); };
   $('filter').onchange = render;
+  window.addEventListener('scroll', hidePreview, true);
+  window.addEventListener('resize', hidePreview);
+  window.addEventListener('blur', hidePreview);
+  window.addEventListener('keydown', event => { if (event.key === 'Escape') hidePreview(); });
   $('reviewTab').onclick = () => show('review');
   $('settingsTab').onclick = () => { loadSettingsForm(); show('settings'); };
   const tabs = ['reviewTab', 'cacheTab', 'settingsTab'].map($);
@@ -198,14 +241,38 @@ async function init() {
   };
   $('approveAll').onclick = () => { visibleRows().forEach(r => { if (r.targets.length && !r.applied) r.decision = 'approved'; }); render(); };
   $('rejectAll').onclick = () => { visibleRows().forEach(r => { if (!r.applied) r.decision = 'rejected'; }); render(); };
+  $('classificationClose').onclick = () => $('classificationDialog').close();
+  $('classificationDialog').oncancel = event => { if (busy) event.preventDefault(); };
   $('apply').onclick = async () => {
     if (busy) return;
+    const total = rows.filter(r => r.decision === 'approved' && !r.applied).length;
+    if (!total) return;
     setBusy(true); $('cancel').hidden = true;
+    const dialog = $('classificationDialog'), progress = $('classificationProgress');
+    const status = $('classificationStatus'), close = $('classificationClose');
+    progress.max = total; progress.value = 0;
+    $('classificationTitle').textContent = '分類中';
+    status.textContent = `0 / ${total} 件 · 分類を準備しています…`;
+    close.disabled = true;
     try {
-      const result = await classify(eagle, rows, analysisLibrary, config.allowCreate, r => message(`分類中: 成功 ${r.saved} 件 / 失敗 ${r.failed} 件`));
-      message(`分類完了: 成功 ${result.saved} 件 / 失敗 ${result.failed} 件。失敗した画像は修正後に再実行できます。`);
-    } catch (e) { message(e.message); }
-    finally { setBusy(false); }
+      dialog.showModal();
+      const result = await classify(eagle, rows, analysisLibrary, config.allowCreate, r => {
+        progress.value = r.saved + r.failed;
+        status.textContent = `${progress.value} / ${total} 件 · 成功 ${r.saved} 件 / 失敗 ${r.failed} 件`;
+        message(`分類中: ${status.textContent}`);
+      });
+      $('classificationTitle').textContent = '分類完了';
+      status.textContent = `${total} / ${total} 件 · 成功 ${result.saved} 件 / 失敗 ${result.failed} 件。${result.failed ? '失敗した画像は修正後に再実行できます。' : ''}`;
+      message(`分類完了: ${status.textContent}`);
+    } catch (e) {
+      $('classificationTitle').textContent = '分類を完了できませんでした';
+      status.textContent = `${progress.value} / ${total} 件処理済み · ${e.message}`;
+      message(status.textContent);
+    } finally {
+      setBusy(false);
+      close.disabled = false;
+      if (dialog.open) close.focus();
+    }
   };
   render();
   // ライブラリ情報の取得中や失敗時も、設定画面は操作できる状態にする。
