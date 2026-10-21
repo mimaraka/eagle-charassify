@@ -1,0 +1,5 @@
+{
+  "name": "eagle-charassify", "version": "0.1.0", "private": true,
+  "description": "確認してから分類する Eagle キャラクターイラスト分類プラグイン",
+  "main": "index.html", "scripts": { "test": "node tests/run.js" }
+}

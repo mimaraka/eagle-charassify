@@ -1,0 +1,7 @@
+{
+  "id": "781eaef3-8c4d-4c5e-b862-6b5932ad6771",
+  "version": "0.1.0", "platform": "all", "arch": "all", "name": "Charassify",
+  "logo": "/logo.png", "keywords": ["character", "tagger"], "devTools": false,
+  "main": { "serviceMode": false, "url": "index.html", "width": 1280, "height": 900,
+    "resizable": true, "minWidth": 800, "minHeight": 600 }
+}
