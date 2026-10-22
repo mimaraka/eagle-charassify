@@ -1,5 +1,6 @@
 'use strict';
 const { validMapping } = require('./core');
+const MAPPING_TIMEOUT_MS = 180000;
 
 async function requestMapping(config, characters, folders, known, signal) {
   if (!config.endpoint || !config.model) throw new Error('LLM の接続先とモデル名を設定してください。');
@@ -42,7 +43,7 @@ async function mapTags(rows, folders, cache, config, progress = () => {}, reques
     const names = missing.slice(i, i + 30);
     progress(`名前を変換中 ${Math.min(i + 30, missing.length)} / ${missing.length}`);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90000);
+    const timer = setTimeout(() => controller.abort(), MAPPING_TIMEOUT_MS);
     try {
       const data = await request(config, names.map(tag => ({ tag, copyrights: [...contexts.get(tag)] })), folders, mappings, controller.signal);
       for (const tag of names) {
@@ -50,7 +51,12 @@ async function mapTags(rows, folders, cache, config, progress = () => {}, reques
         if (!validMapping(m) || (m.folderId && !folders.some(f => f.id === m.folderId))) continue;
         cache.put(tag, m); mappings[tag] = m;
       }
-    } catch (e) { warnings.push(`名前変換に失敗: ${e.message}。保存済みの対応を利用します。`); }
+    } catch (e) {
+      const reason = controller.signal.aborted
+        ? `LLM の応答待ちがタイムアウトしました（${MAPPING_TIMEOUT_MS / 1000}秒）`
+        : e.message;
+      warnings.push(`名前変換に失敗: ${reason}。保存済みの対応を利用します。`);
+    }
     finally { clearTimeout(timer); }
   }
   return { mappings, warnings };

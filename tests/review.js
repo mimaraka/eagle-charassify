@@ -9,6 +9,7 @@ const root = path.resolve(__dirname, '..');
 module.exports = test => {
   test('検出の進捗、LLM 設定修正後のマッピングのみ再試行、対応表の即時反映', async () => {
     const element = () => ({ children: [], value: '', hidden: false,
+      showModal() { this.open = true; }, close() { this.open = false; }, focus() {},
       append(...children) { this.children.push(...children); },
       replaceChildren(...children) { this.children = children; },
       setAttribute(k, v) { this[k] = v; } });
@@ -63,11 +64,13 @@ module.exports = test => {
     const names = () => Array.from(elements.get('results').children, card => card.children[0].alt);
     elements.get('sort').value = 'probabilityDesc'; elements.get('sort').onchange();
     assert.deepEqual(names(), ['test2', 'test1']);
+    assert.match(elements.get('summary').textContent, /表示中 2 件 \/ 全 2 件/);
     elements.get('sort').value = 'probabilityAsc'; elements.get('sort').onchange();
     assert.deepEqual(names(), ['test1', 'test2']);
     elements.get('filter-pending').checked = false;
     elements.get('filter-pending').onchange();
     assert.equal(elements.get('results').children[0].textContent, '該当する結果はありません。');
+    assert.match(elements.get('summary').textContent, /表示中 0 件 \/ 全 2 件/);
     elements.get('approveAll').onclick();
     assert.match(elements.get('summary').textContent, /承認 0 件/);
     elements.get('filter-pending').checked = true;
@@ -83,6 +86,22 @@ module.exports = test => {
     assert.match(elements.get('summary').textContent, /承認 0 件/);
     const findBadge = el => el.className === 'folder-badge folder-badge-new' ? el : el.children?.map(findBadge).find(Boolean);
     for (const card of elements.get('results').children) assert.equal(findBadge(card).textContent, '新規 · 訂正');
+    // 分類成功分だけ非表示になり、失敗分は残して再試行できる。
+    let created = 0, failSave = true;
+    context.eagle.folder.create = async () => ({ id: String(++created) });
+    context.eagle.item = { getById: async id => ({ folders: [], save: async () => {
+      if (id === 2 && failSave) throw Error('保存失敗');
+    } }) };
+    elements.get('approveAll').onclick();
+    await elements.get('apply').onclick();
+    assert.deepEqual(names(), ['test2']);
+    assert.match(elements.get('summary').textContent, /表示中 1 件 \/ 全 2 件/);
+    assert.equal(elements.get('apply').disabled, false);
+    failSave = false;
+    await elements.get('apply').onclick();
+    assert.equal(elements.get('results').children[0].textContent, '該当する結果はありません。');
+    assert.equal(elements.get('apply').disabled, true);
+    assert.match(elements.get('summary').textContent, /表示中 0 件 \/ 全 2 件/);
     // 別のアプリインスタンスでもチェック解除（全解除を含む）を復元する。
     const filterValues = Object.values(realRequire('./filters').filterGroups).flat();
     for (const value of filterValues) elements.get(`filter-${value}`).checked = false;
@@ -105,5 +124,19 @@ module.exports = test => {
     data.set('charassify:filters:v1', JSON.stringify({ approved: false, error: 'invalid' }));
     await reopen();
     for (const value of filterValues) assert.equal(elements.get(`filter-${value}`).checked, value !== 'approved');
+    for (const order of ['probabilityDesc', 'probabilityAsc', 'original']) {
+      elements.get('sort').value = order;
+      elements.get('sort').onchange();
+      elements.get('sort').value = '';
+      await reopen();
+      assert.equal(elements.get('sort').value, order);
+      assert.equal(elements.get('filter-approved').checked, false);
+    }
+    data.set('charassify:sort:v1', 'invalid');
+    await reopen();
+    assert.equal(elements.get('sort').value, 'original');
+    data.delete('charassify:sort:v1');
+    await reopen();
+    assert.equal(elements.get('sort').value, 'original');
   });
 };

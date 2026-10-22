@@ -50,6 +50,30 @@ test('LLM は未知 ID を保存せず copyright 文脈を渡す', async () => {
   });
   assert.equal(c.read().alice,undefined);
 });
+test('LLM は180秒で中断しタイムアウトを明示、保存済み対応は保持', async () => {
+  const originalSet = global.setTimeout, originalClear = global.clearTimeout;
+  let expire, cleared = false;
+  const timer = {};
+  global.setTimeout = (callback, milliseconds) => {
+    assert.equal(milliseconds, 180000); expire = callback; return timer;
+  };
+  global.clearTimeout = handle => { assert.equal(handle, timer); cleared = true; };
+  try {
+    const c = new Cache(storage(), 'lib', 'ja'); c.put('alice', m());
+    const result = await mapTags([{ tags: { character: [{ tag: 'alice' }, { tag: 'new' }] } }], [], c, {}, () => {},
+      async (config, chars, folders, known, signal) => {
+        assert.equal(signal.aborted, false);
+        expire();
+        assert.equal(signal.aborted, true);
+        throw Error('The user aborted a request.');
+      });
+    assert.match(result.warnings[0], /タイムアウトしました（180秒）/);
+    assert.doesNotMatch(result.warnings[0], /user aborted/);
+    assert.equal(result.mappings.alice.character, 'アリス');
+    assert.equal(c.read().new, undefined);
+    assert.equal(cleared, true);
+  } finally { global.setTimeout = originalSet; global.clearTimeout = originalClear; }
+});
 function fixture() {
   const tree = [], saved = [], created = [];
   const api = {library:{path:'lib'}, folder:{getAll:async()=>tree,create:async options=>{
@@ -128,16 +152,14 @@ test('チェックボックスはグループ内 OR・グループ間 AND で絞
     make(3, 'pending', false, 'mapped'), make(4, 'approved', true, 'mapped'),
     make(5, 'approved', false, 'undetected'), make(6, 'approved', false, 'unmapped'),
     make(7, 'approved', false, 'error')];
-  const selected = { decision: ['approved', 'rejected'], classification: ['unapplied'], analysis: ['mapped'] };
+  const selected = { decision: ['approved', 'rejected'], analysis: ['mapped'] };
   const ids = () => rows.filter(row => matchesFilters(row, selected)).map(row => row.id);
   assert.deepEqual(ids(), [1, 2]);
-  selected.classification.push('applied');
-  assert.deepEqual(ids(), [1, 2, 4]);
   selected.analysis.push('undetected', 'error');
-  assert.deepEqual(ids(), [1, 2, 4, 5, 7]);
+  assert.deepEqual(ids(), [1, 2, 5, 7]);
   selected.decision = [];
   assert.deepEqual(ids(), []);
-  assert.equal(rows.filter(row => matchesFilters(row, filterGroups)).length, rows.length);
+  assert.deepEqual(rows.filter(row => matchesFilters(row, filterGroups)).map(row => row.id), [1, 2, 3, 5, 6, 7]);
   // タグ検出成功後の保存エラーもエラーだけに含める。
   const failed = { ...rows[0], applyError: '保存失敗' };
   assert.equal(matchesFilters(failed, { ...filterGroups, analysis: ['mapped'] }), false);

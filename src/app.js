@@ -101,11 +101,12 @@ function showPreview(img, item) {
 function render() {
   hidePreview();
   const approved = rows.filter(r => r.decision === 'approved' && !r.applied).length;
-  $('summary').textContent = `${rows.length} 件 · 承認 ${approved} 件 · 分類済み ${rows.filter(r => r.applied).length} 件`;
+  const visible = visibleRows();
+  $('summary').textContent = `表示中 ${visible.length} 件 / 全 ${rows.length} 件 · 承認 ${approved} 件 · 分類済み ${rows.filter(r => r.applied).length} 件`;
   $('apply').disabled = busy || !approved;
   $('retryMapping').hidden = !rows.some(r => !r.applied && r.mappingIncomplete);
   if (!rows.length) return;
-  const cards = visibleRows().map(row => {
+  const cards = visible.map(row => {
     const card = node('article', null, `card ${row.decision}`);
     const img = node('img'); img.loading = 'lazy'; img.alt = row.item.name;
     img.src = pathToFileURL(row.item.thumbnailPath || row.item.filePath).href;
@@ -252,7 +253,15 @@ async function init() {
   $('retryMapping').onclick = retryMapping;
   $('cancel').onclick = () => { cancelled = true; worker?.stop(); };
   initFilters();
-  $('sort').onchange = render;
+  const sortKey = 'charassify:sort:v1';
+  let savedSort;
+  try { savedSort = localStorage.getItem(sortKey); } catch (_) { /* 取得できない場合は元の順序を使用する。 */ }
+  $('sort').value = ['original', 'probabilityDesc', 'probabilityAsc'].includes(savedSort) ? savedSort : 'original';
+  $('sort').onchange = () => {
+    try { localStorage.setItem(sortKey, $('sort').value); }
+    catch (e) { message(`ソート順序の保存に失敗しました: ${e.message}`); }
+    render();
+  };
   window.addEventListener('scroll', hidePreview, true);
   window.addEventListener('resize', hidePreview);
   window.addEventListener('blur', hidePreview);

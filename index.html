@@ -8,7 +8,6 @@
 <div class="toolbar reviewbar"><strong id="summary">解析結果はまだありません</strong><select id="sort" aria-label="解析結果の並び順" title="検出された全タグ（キャラクター・作品）の最大 probability で並べ替えます。未検出は末尾に表示します。"><option value="original">元の順序</option><option value="probabilityDesc">最大 probability：高い順</option><option value="probabilityAsc">最大 probability：低い順</option></select><button id="approveAll">表示中を承認</button><button id="rejectAll">表示中を却下</button><button id="apply" class="primary">承認済みを分類</button></div>
 <div class="result-filters" role="group" aria-label="解析結果のフィルタ">
 <fieldset><legend>承認状態</legend><label><input type="checkbox" id="filter-pending" checked>未確認</label><label><input type="checkbox" id="filter-approved" checked>承認</label><label><input type="checkbox" id="filter-rejected" checked>却下</label></fieldset>
-<fieldset><legend>分類状態</legend><label><input type="checkbox" id="filter-unapplied" checked>未分類</label><label><input type="checkbox" id="filter-applied" checked>分類済み</label></fieldset>
 <fieldset><legend>解析状態</legend><label><input type="checkbox" id="filter-undetected" checked>タグ未検出</label><label><input type="checkbox" id="filter-mapped" checked>タグ検出・マッピング済</label><label><input type="checkbox" id="filter-unmapped" checked>タグ検出・マッピング未完了</label><label><input type="checkbox" id="filter-error" checked>エラー</label></fieldset>
 </div>
 <div id="results" class="grid"><div class="empty">01 解析 → 02 確認・編集 → 03 一括分類<br><small>複数のキャラクターを、それぞれのフォルダへ分類できます。</small></div></div></section>
