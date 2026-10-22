@@ -83,5 +83,27 @@ module.exports = test => {
     assert.match(elements.get('summary').textContent, /承認 0 件/);
     const findBadge = el => el.className === 'folder-badge folder-badge-new' ? el : el.children?.map(findBadge).find(Boolean);
     for (const card of elements.get('results').children) assert.equal(findBadge(card).textContent, '新規 · 訂正');
+    // 別のアプリインスタンスでもチェック解除（全解除を含む）を復元する。
+    const filterValues = Object.values(realRequire('./filters').filterGroups).flat();
+    for (const value of filterValues) elements.get(`filter-${value}`).checked = false;
+    elements.get('filter-error').onchange();
+    const reopen = async () => {
+      const next = { ...context, module: { exports: {} } };
+      vm.runInNewContext(fs.readFileSync(path.join(root, 'src/app.js'), 'utf8'), next);
+      await next.module.exports.init();
+    };
+    for (const value of filterValues) elements.get(`filter-${value}`).checked = true;
+    await reopen();
+    for (const value of filterValues) assert.equal(elements.get(`filter-${value}`).checked, false);
+    elements.get('filter-approved').checked = true;
+    elements.get('filter-approved').onchange();
+    await reopen();
+    for (const value of filterValues) assert.equal(elements.get(`filter-${value}`).checked, value === 'approved');
+    data.set('charassify:filters:v1', '{broken');
+    await reopen();
+    for (const value of filterValues) assert.equal(elements.get(`filter-${value}`).checked, true);
+    data.set('charassify:filters:v1', JSON.stringify({ approved: false, error: 'invalid' }));
+    await reopen();
+    for (const value of filterValues) assert.equal(elements.get(`filter-${value}`).checked, value !== 'approved');
   });
 };

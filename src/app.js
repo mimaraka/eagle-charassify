@@ -54,6 +54,23 @@ function visibleRows() {
   }
   return visible;
 }
+function initFilters() {
+  const key = 'charassify:filters:v1';
+  const values = Object.values(filterGroups).flat();
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(key) || '{}'); }
+  catch (_) { saved = {}; }
+  for (const value of values) {
+    const input = $(`filter-${value}`);
+    input.checked = typeof saved?.[value] === 'boolean' ? saved[value] : true;
+    input.onchange = () => {
+      try {
+        localStorage.setItem(key, JSON.stringify(Object.fromEntries(values.map(v => [v, $(`filter-${v}`).checked]))));
+      } catch (e) { message(`フィルタの保存に失敗しました: ${e.message}`); }
+      render();
+    };
+  }
+}
 let preview;
 function hidePreview() { if (preview) preview.hidden = true; }
 function showPreview(img, item) {
@@ -234,7 +251,7 @@ async function init() {
   $('analyze').onclick = analyze;
   $('retryMapping').onclick = retryMapping;
   $('cancel').onclick = () => { cancelled = true; worker?.stop(); };
-  for (const value of Object.values(filterGroups).flat()) $(`filter-${value}`).onchange = render;
+  initFilters();
   $('sort').onchange = render;
   window.addEventListener('scroll', hidePreview, true);
   window.addEventListener('resize', hidePreview);
