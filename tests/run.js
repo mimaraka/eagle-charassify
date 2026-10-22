@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert').strict;
-const { flatten, Cache, mergeTags, proposals, resolveMapping, classify } = require('../src/core');
+const { flatten, Cache, mergeTags, proposals, updateProposals, resolveMapping, classify } = require('../src/core');
 const { mapTags, requestMapping } = require('../src/mapping');
 const Worker = require('../src/inference/bridge');
 const path = require('path');
@@ -117,6 +117,54 @@ test('Python の絶対パスと明示コマンドを保持', () => {
   assert.equal(Worker.resolvePythonPath('python3'), 'python3');
 });
 require('./startup')(test);
+require('./review')(test);
+
+test('チェックボックスはグループ内 OR・グループ間 AND で絞り込む', () => {
+  const { filterGroups, matchesFilters } = require('../src/filters');
+  const make = (id, decision, applied, state) => ({ id, decision, applied,
+    tags: { character: state === 'undetected' ? [] : [{ tag: 'alice' }] },
+    errors: state === 'error' ? ['検出失敗'] : [], analysisSucceeded: state === 'mapped' });
+  const rows = [make(1, 'approved', false, 'mapped'), make(2, 'rejected', false, 'mapped'),
+    make(3, 'pending', false, 'mapped'), make(4, 'approved', true, 'mapped'),
+    make(5, 'approved', false, 'undetected'), make(6, 'approved', false, 'unmapped'),
+    make(7, 'approved', false, 'error')];
+  const selected = { decision: ['approved', 'rejected'], classification: ['unapplied'], analysis: ['mapped'] };
+  const ids = () => rows.filter(row => matchesFilters(row, selected)).map(row => row.id);
+  assert.deepEqual(ids(), [1, 2]);
+  selected.classification.push('applied');
+  assert.deepEqual(ids(), [1, 2, 4]);
+  selected.analysis.push('undetected', 'error');
+  assert.deepEqual(ids(), [1, 2, 4, 5, 7]);
+  selected.decision = [];
+  assert.deepEqual(ids(), []);
+  assert.equal(rows.filter(row => matchesFilters(row, filterGroups)).length, rows.length);
+  // タグ検出成功後の保存エラーもエラーだけに含める。
+  const failed = { ...rows[0], applyError: '保存失敗' };
+  assert.equal(matchesFilters(failed, { ...filterGroups, analysis: ['mapped'] }), false);
+  assert.equal(matchesFilters(failed, { ...filterGroups, analysis: ['error'] }), true);
+  assert.equal(matchesFilters(rows[5], { ...filterGroups, analysis: ['unmapped'] }), true);
+});
+
+test('対応表編集は該当画像の自動分類先を差分更新し手動編集・分類済みを保持', () => {
+  const make = tags => ({ tags: { character: tags.map(tag => ({ tag })) }, errors: [], targets: [], decision: 'pending' });
+  const rows = [make(['alice', 'bob']), make(['bob']), make(['alice'])];
+  const mappings = { alice: m(), bob: m('ボブ') };
+  updateProposals(rows, mappings, [], true);
+  rows[0].targets = rows[0].targets.filter(t => t.character !== 'ボブ');
+  rows[0].targets.push({ ...m('手動'), path: '作品A/手動', create: true });
+  rows.forEach(r => { r.decision = 'approved'; }); rows[2].applied = true;
+  mappings.alice = m('訂正');
+  assert.equal(updateProposals(rows, mappings, [], true, 'alice'), 1);
+  assert.deepEqual(rows[0].targets.map(t => t.character), ['手動', '訂正']);
+  assert.equal(rows[0].decision, 'pending');
+  assert.equal(rows[1].decision, 'approved');
+  assert.equal(rows[2].targets[0].character, 'アリス');
+  delete mappings.alice;
+  updateProposals(rows, mappings, [], true, 'alice');
+  assert.equal(rows[0].analysisSucceeded, false);
+  assert.equal(rows[0].mappingIncomplete, true);
+  assert.deepEqual(rows[0].targets.map(t => t.character), ['手動']);
+});
 test('Camie モデルの相対パス・空欄はプラグイン基準、絶対パスは保持', () => {
   const root = path.resolve(__dirname, '..');
   for (const camiePath of [undefined, '', '  ', 'models']) {

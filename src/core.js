@@ -48,6 +48,28 @@ function proposals(tags, mappings, folders, allowCreate) {
   }
   return [...unique.values()];
 }
+// 自動提案の差分だけを反映し、画像ごとの手動追加・削除を保持する。
+function updateProposals(rows, mappings, folders, allowCreate, tag) {
+  let changed = 0;
+  const key = t => t.folderId || t.path;
+  for (const row of rows) {
+    if (row.applied || (tag && !(row.tags.character || []).some(t => t.tag === tag))) continue;
+    const previous = row.autoTargets || [];
+    const next = proposals(row.tags, mappings, folders, allowCreate);
+    const targets = row.targets.filter(t => !previous.some(p => key(p) === key(t)) || next.some(n => key(n) === key(t)));
+    for (const target of next) {
+      if (!previous.some(p => key(p) === key(target)) && !targets.some(t => key(t) === key(target))) targets.push(target);
+    }
+    if (JSON.stringify(row.targets) !== JSON.stringify(targets)) {
+      row.targets = targets; row.decision = 'pending'; row.applyError = null; changed++;
+    }
+    row.autoTargets = next;
+    const characters = row.tags.character || [];
+    row.mappingIncomplete = characters.some(t => !resolveMapping(mappings[t.tag], folders, allowCreate));
+    row.analysisSucceeded = !row.errors.length && characters.length > 0 && !row.mappingIncomplete;
+  }
+  return changed;
+}
 class Cache {
   constructor(storage, library, language) {
     if (!library) throw new Error('ライブラリを識別できません。');
@@ -114,4 +136,4 @@ async function classify(api, rows, library, allowCreate, progress = () => {}) {
   }
   return result;
 }
-module.exports = { flatten, segment, validMapping, resolveMapping, mergeTags, proposals, Cache, classify };
+module.exports = { flatten, segment, validMapping, resolveMapping, mergeTags, proposals, updateProposals, Cache, classify };

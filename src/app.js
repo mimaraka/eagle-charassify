@@ -1,7 +1,8 @@
 'use strict';
 const { pathToFileURL } = require('url');
-const { flatten, Cache, mergeTags, proposals, resolveMapping, classify } = require('./core');
+const { flatten, Cache, mergeTags, updateProposals, resolveMapping, classify } = require('./core');
 const { mapTags } = require('./mapping');
+const { filterGroups, matchesFilters } = require('./filters');
 const { getTargetImageItems } = require('./eagle/items');
 const Worker = require('./inference/bridge');
 const $ = id => document.getElementById(id);
@@ -25,7 +26,7 @@ function show(panel) {
 }
 function setBusy(value) {
   busy = value;
-  for (const id of ['analyze', 'apply', 'approveAll', 'rejectAll', 'source', 'tagger', 'settingsTab', 'cacheTab']) $(id).disabled = value;
+  for (const id of ['analyze', 'retryMapping', 'apply', 'approveAll', 'rejectAll', 'source', 'tagger', 'settingsTab', 'cacheTab']) $(id).disabled = value;
   $('cancel').hidden = !value;
   render();
 }
@@ -37,8 +38,21 @@ async function refreshLibrary() {
   $('folderPaths').replaceChildren(...folders.map(f => { const o = node('option'); o.value = f.path; return o; }));
 }
 function visibleRows() {
-  const filter = $('filter').value;
-  return rows.filter(r => filter === 'all' || (filter === 'success' ? r.analysisSucceeded : filter === 'error' ? r.errors.length || r.applyError : r.decision === filter));
+  const selected = Object.fromEntries(Object.entries(filterGroups).map(([group, values]) =>
+    [group, values.filter(value => $(`filter-${value}`).checked)]));
+  const visible = rows.filter(row => matchesFilters(row, selected));
+  const order = $('sort').value;
+  if (order === 'probabilityDesc' || order === 'probabilityAsc') {
+    const maximum = row => Object.values(row.tags).flat().reduce((max, tag) =>
+      Number.isFinite(tag.confidence) ? Math.max(max, tag.confidence) : max, -1);
+    visible.sort((a, b) => {
+      const left = maximum(a), right = maximum(b);
+      // 未検出の画像は昇順・降順とも末尾に表示する。
+      if (left < 0 || right < 0) return (left < 0) - (right < 0);
+      return order === 'probabilityAsc' ? left - right : right - left;
+    });
+  }
+  return visible;
 }
 let preview;
 function hidePreview() { if (preview) preview.hidden = true; }
@@ -72,6 +86,7 @@ function render() {
   const approved = rows.filter(r => r.decision === 'approved' && !r.applied).length;
   $('summary').textContent = `${rows.length} 件 · 承認 ${approved} 件 · 分類済み ${rows.filter(r => r.applied).length} 件`;
   $('apply').disabled = busy || !approved;
+  $('retryMapping').hidden = !rows.some(r => !r.applied && r.mappingIncomplete);
   if (!rows.length) return;
   const cards = visibleRows().map(row => {
     const card = node('article', null, `card ${row.decision}`);
@@ -88,7 +103,7 @@ function render() {
     const targets = node('div', null, 'targets');
     row.targets.forEach((t, i) => {
       const line = node('div', null, 'target');
-      const name = node('span', `${t.create ? '新規: ' : ''}${t.path.split('/').pop()}`);
+      const name = node('span', `${t.create ? '新規 · ' : ''}${t.path.split('/').pop()}`, `folder-badge${t.create ? ' folder-badge-new' : ''}`);
       name.title = t.path; line.append(name);
       const remove = button('×', () => { row.targets.splice(i, 1); row.decision = 'pending'; render(); });
       remove.title = '分類先を削除'; remove.disabled = busy || row.applied; line.append(remove); targets.append(line);
@@ -129,6 +144,8 @@ async function analyze() {
     $('results').replaceChildren(node('div', items.length ? '解析を準備しています…' : '対象の画像はありません。', 'empty'));
     if (!items.length) { message('対象の画像はありません。'); return; }
     const models = config.tagger === 'both' ? ['camie', 'pixai'] : [config.tagger];
+    const progress = $('detectionProgress');
+    progress.hidden = false; progress.max = rows.length * models.length; progress.value = 0;
     for (const model of models) {
       if (cancelled) break;
       message(`${model} を読み込み中… 初回は時間がかかります。`);
@@ -140,24 +157,40 @@ async function analyze() {
           message(`${model} で解析中 ${i + 1} / ${rows.length}`);
           try { rows[i].detections.push({ model, tags: await worker.infer(rows[i].item.filePath) }); }
           catch (e) { rows[i].errors.push(`${model}: ${e.message}`); }
+          progress.value++;
         }
-      } catch (e) { rows.forEach(r => r.errors.push(`${model}: ${e.message}`)); }
+      } catch (e) { rows.forEach(r => r.errors.push(`${model}: ${e.message}`)); progress.value += rows.length; }
       finally { worker.stop(); worker = null; }
     }
     for (const row of rows) row.tags = mergeTags(row.detections);
     if (cancelled) { rows = []; $('results').replaceChildren(node('div', '解析を中止しました。', 'empty')); message('中止しました。'); return; }
     $('cancel').hidden = true;
-    const mapped = await mapTags(rows, folders, cache(), config, message);
-    for (const row of rows) {
-      row.targets = proposals(row.tags, mapped.mappings, folders, config.allowCreate);
-      const characters = row.tags.character || [];
-      row.analysisSucceeded = !row.errors.length && characters.length > 0 &&
-        characters.every(t => resolveMapping(mapped.mappings[t.tag], folders, config.allowCreate));
-    }
-    $('warnings').textContent = [...new Set(mapped.warnings)].join('\n');
+    $('detectionProgress').hidden = true;
+    await runMapping();
     message('解析が完了しました。分類先を確認し、各画像を承認してください。');
   } catch (e) { message(e.message); }
+  finally { $('detectionProgress').hidden = true; setBusy(false); }
+}
+async function runMapping() {
+  const mapped = await mapTags(rows.filter(r => !r.applied), folders, cache(), config, message);
+  updateProposals(rows, mapped.mappings, folders, config.allowCreate);
+  $('warnings').textContent = [...new Set(mapped.warnings)].join('\n');
+}
+async function retryMapping() {
+  if (busy || !rows.length) return;
+  setBusy(true); $('cancel').hidden = true;
+  try {
+    await refreshLibrary();
+    if (library !== analysisLibrary) throw new Error('ライブラリが変更されました。解析し直してください。');
+    await runMapping();
+    message('マッピング処理が完了しました。分類先を確認してください。');
+  } catch (e) { message(e.message); }
   finally { setBusy(false); }
+}
+function refreshMappedRows(tag) {
+  if (library !== analysisLibrary || eagle.library.path !== analysisLibrary) return;
+  const changed = updateProposals(rows, cache().read(), folders, config.allowCreate, tag);
+  render(); message(`対応表を更新しました。${changed} 件の分類先を更新しました。`);
 }
 function saveConfig() { localStorage.setItem('charassify:settings:v1', JSON.stringify(config)); }
 function loadSettingsForm() {
@@ -180,9 +213,9 @@ function renderCache() {
     for (const f of folders) { const opt = node('option', f.path); opt.value = f.id; folder.append(opt); }
     folder.value = m.folderId || '';
     row.append(character, copyright, folder, button('保存', () => {
-      try { cache().put(tag, { character: character.value.trim(), copyright: copyright.value.trim(), folderId: folder.value || null }); renderCache(); }
+      try { cache().put(tag, { character: character.value.trim(), copyright: copyright.value.trim(), folderId: folder.value || null }); refreshMappedRows(tag); renderCache(); }
       catch (e) { window.alert(e.message); }
-    }), button('削除', () => { cache().remove(tag); renderCache(); }));
+    }), button('削除', () => { cache().remove(tag); refreshMappedRows(tag); renderCache(); }));
     return row;
   }));
   if (!entries.length) $('cacheList').append(node('p', '保存済みの対応はありません。'));
@@ -199,8 +232,10 @@ async function init() {
     $('source').value = config.source; $('tagger').value = config.tagger;
   } catch (e) { message(`初期化エラー: ${e.message}`); }
   $('analyze').onclick = analyze;
+  $('retryMapping').onclick = retryMapping;
   $('cancel').onclick = () => { cancelled = true; worker?.stop(); };
-  $('filter').onchange = render;
+  for (const value of Object.values(filterGroups).flat()) $(`filter-${value}`).onchange = render;
+  $('sort').onchange = render;
   window.addEventListener('scroll', hidePreview, true);
   window.addEventListener('resize', hidePreview);
   window.addEventListener('blur', hidePreview);
@@ -234,9 +269,10 @@ async function init() {
     for (const input of $('settingsForm').elements) if (input.name) next[input.name] = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value.trim();
     next.pythonPath = next.pythonPath || defaults.pythonPath;
     next.camiePath = next.camiePath || defaults.camiePath;
+    const retainResults = Object.keys(defaults).every(key => ['endpoint', 'model', 'apiKey'].includes(key) || config[key] === next[key]);
     config = next; saveConfig();
     // 言語・新規作成ポリシーを変更した後は古い承認結果を使わない。
-    rows = []; $('results').replaceChildren(node('div', '設定を保存しました。解析を開始してください。', 'empty'));
+    if (!retainResults) { rows = []; $('results').replaceChildren(node('div', '設定を保存しました。解析を開始してください。', 'empty')); }
     render(); show('review'); message('設定を保存しました。');
   };
   $('approveAll').onclick = () => { visibleRows().forEach(r => { if (r.targets.length && !r.applied) r.decision = 'approved'; }); render(); };
