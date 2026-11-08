@@ -40,7 +40,17 @@ PixAI は [公式モデル](https://huggingface.co/pixai-labs/pixai-tagger-v1.0)
 
 公式 PixAI モデルは公開されているため、取得時に Hugging Face の認証トークンを送信しません。これにより、別の用途で保存されたトークンが期限切れでも読み込めます。別のモデル ID を指定した場合は既存の認証設定を使用します。
 
-モデルは同梱していません。GPU の利用には環境に合った PyTorch / CUDA が必要です。Camie は標準構成で CPU 推論を利用します。GPU を使う場合は `onnxruntime` の代わりに対応する `onnxruntime-gpu` を導入してください。両モデル併用時はモデルごとにプロセスを終了してから次を起動し、モデルを同時にメモリへ保持しません。
+モデルは同梱していません。推論バックエンドは自動選択します。
+
+- **PixAI**: CUDA → macOS の MPS → CPU の順で選択します。GPU の初期化・推論で RuntimeError / NotImplementedError が発生した場合は CPU で再試行し、その後は CPU を使います。
+- **Camie**: インストール済み ONNX Runtime が提供する CUDA → Core ML → DirectML → CPU の順で初期化を試します。GPU 初期化に失敗した場合は次の候補に切り替えます。GPU 未対応の演算は CPU で実行される場合があります。
+- **Mac**: MPS 対応 PyTorch と Core ML 対応 ONNX Runtime が必要です。標準の依存インストール後、利用可能なバックエンドを自動検出します。OS・機種・パッケージが対応していない場合は CPU を使います。
+- **Windows / NVIDIA**: PixAI は CUDA 対応 PyTorch が必要です。Camie は標準の `onnxruntime` をアンインストールし、環境の CUDA / cuDNN に対応する `onnxruntime-gpu` を導入してください。
+- **Windows / AMD・Intel など**: Camie は `onnxruntime` の代わりに `onnxruntime-directml` を導入すると DirectML を自動選択します。PixAI の DirectML には未対応で、CUDA / MPS がなければ CPU を使います。
+
+ONNX Runtime の各配布パッケージは同時にインストールしないでください。GPU と対応ドライバーがあるだけでは不十分で、上記の対応ランタイムも必要です。選択したデバイスとフォールバックは推論プロセスのログに出力します。実モデルの各 GPU での動作・速度は実機検証が必要です。
+
+両モデル併用時はモデルごとにプロセスを終了してから次を起動し、モデルを同時にメモリへ保持しません。
 
 Windows で Anaconda 由来の仮想環境を使う場合、古い Visual C++ DLL が優先され、PyTorch の `c10.dll` 読み込みで `WinError 1114` が発生することがあります。Charassify はこの環境を検出すると、Windows のシステムフォルダにある Visual C++ ランタイムを推論プロセス内で先に読み込みます。Anaconda 本体やシステムの DLL ファイルは変更しません。
 

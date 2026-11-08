@@ -73,17 +73,36 @@ def _register_cuda_dll_dirs():
 
 
 def create_session(model_path):
-    """ONNXセッションを作成（CUDA優先、CPUフォールバック）"""
+    """利用可能なGPUを優先し、初期化に失敗した場合は次の候補を試す。"""
     _register_cuda_dll_dirs()
     import onnxruntime as ort
 
-    providers = []
-    if ort.get_device() == "GPU":
-        providers.append("CUDAExecutionProvider")
-    providers.append("CPUExecutionProvider")
-
-    session = ort.InferenceSession(model_path, providers=providers)
+    available = ort.get_available_providers()
+    candidates = [name for name in (
+        "CUDAExecutionProvider", "CoreMLExecutionProvider", "DmlExecutionProvider"
+    ) if name in available]
+    candidates.append("CPUExecutionProvider")
+    for provider in candidates:
+        options = ort.SessionOptions()
+        if provider == "DmlExecutionProvider":
+            options.enable_mem_pattern = False
+            options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        providers = [provider]
+        if provider != "CPUExecutionProvider":
+            providers.append("CPUExecutionProvider")
+        try:
+            session = ort.InferenceSession(model_path, sess_options=options, providers=providers)
+            if provider != "CPUExecutionProvider" and provider not in session.get_providers():
+                log(f"{provider} unavailable at initialization; trying next backend")
+                del session
+                continue
+            break
+        except Exception as exc:
+            if provider == "CPUExecutionProvider":
+                raise
+            log(f"{provider} initialization failed: {exc}; trying next backend")
     active_provider = session.get_providers()[0]
+    log(f"Inference provider: {active_provider} (unsupported operations may run on CPU)")
     input_name = session.get_inputs()[0].name
 
     return session, input_name, active_provider

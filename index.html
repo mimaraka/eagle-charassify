@@ -21,7 +21,7 @@
 <label>名前の出力言語<input name="language" required placeholder="日本語 / English"></label><label class="check"><input name="allowCreate" type="checkbox">既存フォルダがなければ「作品名 / キャラクター名」を新規作成</label>
 <label>LLM 接続先（Chat Completions 互換）<input name="endpoint" type="url" placeholder="https://…/v1/chat/completions"></label><label>モデル名<input name="model" placeholder="利用するモデルの ID"></label><label>API キー<input name="apiKey" type="password" autocomplete="off"><small>設定と一緒に保存されます。空欄にして保存すると削除できます。</small></label>
 <p class="note">API キーなしでも保存済みの対応表・手動編集を利用できます。新しい言語に切り替えると、その言語専用の対応表を使用します。</p><div class="settings-actions"><button class="primary" type="submit">設定を保存</button></div></form></section>
-<section id="cachePanel" role="tabpanel" aria-labelledby="cacheTab" hidden><h2>名前の対応表</h2><p>現在のライブラリ・出力言語のキャッシュです。変更は解析済みの未分類アイテムにも反映されます。分類先が変わると承認は未確認に戻ります。衣装差分は同じキャラクター名・分類先に設定してください。</p><input id="cacheSearch" placeholder="タグ・キャラクター名で検索" aria-label="対応表を検索"><div id="cacheList"></div></section>
+<section id="cachePanel" role="tabpanel" aria-labelledby="cacheTab" hidden><h2>名前の対応表</h2><p>現在のライブラリ・出力言語のキャッシュです。変更は解析済みの未分類アイテムにも反映されます。分類先が変わると承認は未確認に戻ります。衣装差分は同じキャラクター名・分類先に設定してください。</p><div class="toolbar"><input id="cacheSearch" placeholder="タグ・キャラクター名で検索" aria-label="対応表を検索"><label><input id="cacheAutomaticOnly" type="checkbox">「名前から照合 / 新規作成」のみ表示</label></div><div id="cacheList"></div></section>
 </main>
 <dialog id="classificationDialog" aria-labelledby="classificationTitle" aria-describedby="classificationStatus">
 <h2 id="classificationTitle">分類中</h2>

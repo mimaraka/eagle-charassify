@@ -220,7 +220,10 @@ function loadSettingsForm() {
 }
 function renderCache() {
   const search = $('cacheSearch').value.toLowerCase();
-  const entries = Object.entries(cache().read()).filter(([tag, m]) => `${tag} ${m.character} ${m.copyright}`.toLowerCase().includes(search));
+  const automaticOnly = $('cacheAutomaticOnly').checked;
+  const allEntries = Object.entries(cache().read());
+  const entries = allEntries.filter(([tag, m]) => (!automaticOnly || !m.folderId)
+    && `${tag} ${m.character} ${m.copyright}`.toLowerCase().includes(search));
   $('cacheList').replaceChildren(...entries.map(([tag, m]) => {
     const row = node('div', null, 'cache-entry'); row.append(node('strong', tag));
     const character = node('input'); character.value = m.character; character.setAttribute('aria-label', 'キャラクター名');
@@ -236,7 +239,7 @@ function renderCache() {
     }), button('削除', () => { cache().remove(tag); refreshMappedRows(tag); renderCache(); }));
     return row;
   }));
-  if (!entries.length) $('cacheList').append(node('p', '保存済みの対応はありません。'));
+  if (!entries.length) $('cacheList').append(node('p', allEntries.length ? '条件に一致する対応はありません。' : '保存済みの対応はありません。'));
 }
 let initialized = false;
 async function init() {
@@ -289,6 +292,7 @@ async function init() {
     } catch (e) { message(e.message); }
   };
   $('cacheSearch').oninput = renderCache;
+  $('cacheAutomaticOnly').onchange = renderCache;
   $('settingsForm').onsubmit = event => {
     event.preventDefault();
     const next = { ...config };

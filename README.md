@@ -40,7 +40,17 @@ PixAI uses the Transformers pipeline from the [official model](https://huggingfa
 
 Because the official PixAI model is public, no Hugging Face authentication token is sent when downloading it. This allows loading even if a token saved for another purpose has expired. Other model IDs use the existing authentication configuration.
 
-Models are not bundled. GPU use requires PyTorch / CUDA versions appropriate for your environment. Camie uses CPU inference by default; to use a GPU, install a compatible `onnxruntime-gpu` instead of `onnxruntime`. When using both models, each model's process exits before the next starts, so both models are never held in memory at once.
+Models are not bundled. Inference backends are selected automatically.
+
+- **PixAI**: CUDA → macOS MPS → CPU. A RuntimeError / NotImplementedError during GPU initialization or inference triggers a CPU retry; subsequent inference stays on CPU.
+- **Camie**: Tries the installed ONNX Runtime providers in this order: CUDA → Core ML → DirectML → CPU. Failed GPU initialization advances to the next candidate. Unsupported operations may run on CPU.
+- **Mac**: Requires MPS-capable PyTorch and Core ML-capable ONNX Runtime. After installing the standard dependencies, available backends are detected automatically. Unsupported OS versions, hardware, or packages use CPU.
+- **Windows / NVIDIA**: PixAI requires CUDA-enabled PyTorch. For Camie, uninstall the standard `onnxruntime` and install `onnxruntime-gpu` compatible with your CUDA / cuDNN environment.
+- **Windows / AMD, Intel, etc.**: Camie automatically selects DirectML when `onnxruntime-directml` is installed instead of `onnxruntime`. PixAI does not support DirectML; it uses CPU without CUDA / MPS.
+
+Do not install multiple ONNX Runtime distributions together. GPU hardware and drivers alone are insufficient; the matching runtimes above are required. Selected devices and fallbacks are written to the inference process logs. Actual model compatibility and performance on each GPU require hardware validation.
+
+When using both models, each model's process exits before the next starts, so both models are never held in memory at once.
 
 On Windows, virtual environments derived from Anaconda may prioritize older Visual C++ DLLs, causing `WinError 1114` when PyTorch loads `c10.dll`. When Charassify detects this environment, it preloads the Visual C++ runtime from the Windows system directory within the inference process. It does not modify Anaconda or system DLL files.
 
